@@ -41,7 +41,7 @@ func MarshalOnePayload(w io.Writer, model interface{}) error {
 // and doesn't write out results.
 // Useful is you use your JSON rendering library.
 func MarshalOne(model interface{}) (*OnePayload, error) {
-	rootNode, included, err := visitModelNode(model, true)
+	rootNode, included, err := visitModelNode(model)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func MarshalMany(models []interface{}) (*ManyPayload, error) {
 	for i := 0; i < modelsValues.Len(); i++ {
 		model := modelsValues.Index(i).Interface()
 
-		node, included, err := visitModelNode(model, true)
+		node, included, err := visitModelNode(model)
 		if err != nil {
 			return nil, err
 		}
@@ -116,38 +116,12 @@ func MarshalMany(models []interface{}) (*ManyPayload, error) {
 	return payload, nil
 }
 
-// MarshalOnePayloadEmbedded - This method not meant to for use in implementation code, although feel
-// free.  The purpose of this method is for use in tests.  In most cases, your
-// request payloads for create will be embedded rather than sideloaded for related records.
-// This method will serialize a single struct pointer into an embedded json
-// response.  In other words, there will be no, "included", array in the json
-// all relationships will be serailized inline in the data.
-//
-// However, in tests, you may want to construct payloads to post to create methods
-// that are embedded to most closely resemble the payloads that will be produced by
-// the client.  This is what this method is intended for.
-//
-// model interface{} should be a pointer to a struct.
-func MarshalOnePayloadEmbedded(w io.Writer, model interface{}) error {
-	rootNode, _, err := visitModelNode(model, false)
-	if err != nil {
-		return err
-	}
-
-	payload := &OnePayload{Data: rootNode}
-
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func visitModelNode(model interface{}, sideload bool) (*Node, []*Node, error) {
+func visitModelNode(model interface{}) (*Node, []*Node, error) {
 	node := new(Node)
 
 	var er error
 	var included []*Node
+	var sideload bool
 
 	modelType := reflect.TypeOf(model).Elem()
 	modelValue := reflect.ValueOf(model).Elem()
@@ -178,9 +152,15 @@ func visitModelNode(model interface{}, sideload bool) (*Node, []*Node, error) {
 
 		annotation := args[0]
 
-		if (annotation == "client-id" && len(args) != 1) || (annotation != "client-id" && len(args) != 2) {
+		if (annotation == "client-id" && len(args) != 1) || (annotation != "client-id" && len(args) < 2) {
 			er = BadJSONAPIStructTag{structField.Name}
 			return false
+		}
+
+		if len(args) == 3 && args[2] == "include" {
+			sideload = true
+		} else {
+			sideload = false
 		}
 
 		if annotation == "primary" {
@@ -225,32 +205,29 @@ func visitModelNode(model interface{}, sideload bool) (*Node, []*Node, error) {
 				relationship, incl, err := visitModelNodeRelationships(args[1], fieldValue, sideload)
 
 				if err == nil {
-					d := relationship.Data
 					if sideload {
 						included = append(included, incl...)
-						var shallowNodes []*Node
-						for _, node := range d {
-							shallowNodes = append(shallowNodes, toShallowNode(node))
-						}
-
-						node.Relationships[args[1]] = &RelationshipManyNode{Data: shallowNodes}
-					} else {
-						node.Relationships[args[1]] = relationship
 					}
+
+					d := relationship.Data
+					var shallowNodes []*Node
+					for _, node := range d {
+						shallowNodes = append(shallowNodes, toShallowNode(node))
+					}
+
+					node.Relationships[args[1]] = &RelationshipManyNode{Data: shallowNodes}
 				} else {
 					er = err
 					return false
 				}
 			} else {
-				relationship, incl, err := visitModelNode(fieldValue.Interface(), sideload)
+				relationship, incl, err := visitModelNode(fieldValue.Interface())
 				if err == nil {
 					if sideload {
 						included = append(included, incl...)
 						included = append(included, relationship)
-						node.Relationships[args[1]] = &RelationshipOneNode{Data: toShallowNode(relationship)}
-					} else {
-						node.Relationships[args[1]] = &RelationshipOneNode{Data: relationship}
 					}
+					node.Relationships[args[1]] = &RelationshipOneNode{Data: toShallowNode(relationship)}
 				} else {
 					er = err
 					return false
@@ -292,7 +269,7 @@ func visitModelNodeRelationships(relationName string, models reflect.Value, side
 	}
 
 	for i := 0; i < models.Len(); i++ {
-		node, incl, err := visitModelNode(models.Index(i).Interface(), sideload)
+		node, incl, err := visitModelNode(models.Index(i).Interface())
 		if err != nil {
 			return nil, nil, err
 		}

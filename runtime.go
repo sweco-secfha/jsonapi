@@ -62,12 +62,6 @@ func (r *Runtime) MarshalManyPayload(w io.Writer, models []interface{}) error {
 	})
 }
 
-func (r *Runtime) MarshalOnePayloadEmbedded(w io.Writer, model interface{}) error {
-	return r.instrumentCall(MarshalStart, MarshalStop, func() error {
-		return MarshalOnePayloadEmbedded(w, model)
-	})
-}
-
 func (r *Runtime) instrumentCall(start Event, stop Event, c func() error) error {
 	if !r.shouldInstrument() {
 		return c()

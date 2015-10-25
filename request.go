@@ -104,7 +104,7 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 
 		annotation := args[0]
 
-		if (annotation == "client-id" && len(args) != 1) || (annotation != "client-id" && len(args) != 2) {
+		if (annotation == "client-id" && len(args) != 1) || (annotation != "client-id" && len(args) < 2) {
 			er = BadJSONAPIStructTag{fieldType.Name}
 			return false
 		}
